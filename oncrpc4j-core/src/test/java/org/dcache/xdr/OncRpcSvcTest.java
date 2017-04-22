@@ -80,6 +80,7 @@ public class OncRpcSvcTest {
 		String TEST_PROG_OWNER = "superuser";
 		OncRpcbindServer bindService = new OncRpcbindServer();
 		OncRpcProgram portMapProg = new OncRpcProgram(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V2);
+
         svc = new OncRpcSvcBuilder()
                 .withTCP()
                 .withUDP()
@@ -105,7 +106,48 @@ public class OncRpcSvcTest {
 			// do dump lookup test
 			boolean found = false;
 			for ( rpcb current : portmapClient.dump() ) {
-				if ( current.getProg() == 100024 && current.getVers() == 1 ) {
+				if ( current.getProg() == TEST_PROG && current.getVers() == TEST_PROG_VER ) {
+					found = true;
+				}
+			}
+			assertTrue(!found); // we should not find one anymore
+			svc.unregister(portMapProg); // just remove portmap
+        }
+    }
+	
+	@Test
+    public void testPortmapV4SetApplication() throws IOException, TimeoutException {
+		int TEST_PROG = 100024;
+		int TEST_PROG_VER = 1;
+		String TEST_PROG_OWNER = "superuser";
+		OncRpcbindServer bindService = new OncRpcbindServer(true); // V4 testing
+		OncRpcProgram portMapProg = new OncRpcProgram(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V4);
+        svc = new OncRpcSvcBuilder()
+                .withTCP()
+                .withUDP()
+                .withoutAutoPublish()
+                .withMinPort(0)
+                .withMinPort(4096)
+                .withBindAddress("127.0.0.1")
+                .build();
+		svc.register(portMapProg,bindService);
+        svc.start();
+        try ( OncRpcClient rpcClient = new OncRpcClient(InetAddress.getByName(null), IpProtocolType.UDP, svc.getInetSocketAddress(IpProtocolType.UDP).getPort() ) ) {
+			OncPortmapClient portmapClient = new GenericPortmapClient(rpcClient.connect()); // init portmapper (only v2 atm)
+            assertTrue("ping portmap",portmapClient.ping()); // ping portmap
+			assertTrue("check port", portmapClient.getPort(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V4, "tcp").equals("0.0.0.0.0.111") ); // check port
+			String addr = InetSocketAddresses.uaddrOf(new InetSocketAddress("0.0.0.0",1234)); 
+			assertTrue("req app tcp", portmapClient.setPort(TEST_PROG, TEST_PROG_VER, IpProtocolType.toString(IpProtocolType.TCP),addr, TEST_PROG_OWNER) ); // reg app with tcp and udp
+			assertTrue("req app udp", portmapClient.setPort(TEST_PROG, TEST_PROG_VER, IpProtocolType.toString(IpProtocolType.UDP),addr, TEST_PROG_OWNER) ); // reg app with udp and udp
+			assertFalse("req again app tcp", portmapClient.setPort(TEST_PROG, TEST_PROG_VER, IpProtocolType.toString(IpProtocolType.TCP),addr, TEST_PROG_OWNER) ); // try again app with tcp 
+			assertFalse("req again app udp", portmapClient.setPort(TEST_PROG, TEST_PROG_VER, IpProtocolType.toString(IpProtocolType.UDP),addr, TEST_PROG_OWNER) ); // try again app with udp 
+			assertTrue("check port match", addr.equals( portmapClient.getPort(TEST_PROG,TEST_PROG_VER, IpProtocolType.toString(IpProtocolType.TCP) ) ) ); // check tcp address match
+			assertTrue("delete app", portmapClient.unsetPort(TEST_PROG, TEST_PROG_VER, TEST_PROG_OWNER) ); // remove app 
+			assertFalse("delete app again", portmapClient.unsetPort(TEST_PROG, TEST_PROG_VER,TEST_PROG_OWNER) ); // remove app again
+			// do dump lookup test
+			boolean found = false;
+			for ( rpcb current : portmapClient.dump() ) {
+				if ( current.getProg() == TEST_PROG && current.getVers() == TEST_PROG_VER ) {
 					found = true;
 				}
 			}

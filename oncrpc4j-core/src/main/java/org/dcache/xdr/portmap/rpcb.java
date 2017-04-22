@@ -113,6 +113,10 @@ public class rpcb implements XdrAble {
                 _prog, _vers, _netid, _addr, _owner);
     }
 
+	public String getAddress() {
+		return _addr;
+	}
+	
     public mapping toMapping() {
 
         return new mapping(_prog, _vers, netid.idOf(_netid) , netid.getPort(_addr) );

@@ -29,8 +29,8 @@ import org.dcache.xdr.XdrEncodingStream;
  * A list of mappings.
  */
 public class rpcb_list implements XdrAble{
-
     private rpcb _rpcbMap;
+	private rpcb_list _next;
 
     public void setNext(rpcb_list next) {
         _next = next;
@@ -48,7 +48,7 @@ public class rpcb_list implements XdrAble{
 		return _next;
 	}
 		
-    private rpcb_list _next;
+    
 
     public rpcb_list() {}
 
@@ -67,14 +67,17 @@ public class rpcb_list implements XdrAble{
 
     @Override
     public void xdrEncode(XdrEncodingStream xdr) throws OncRpcException, IOException {
-
-        xdr.xdrEncodeBoolean(true);
-       _rpcbMap.xdrEncode(xdr);
-        if(_next != null) {
-            _next.xdrEncode(xdr);
-        }else{
-            xdr.xdrEncodeBoolean(false);
-        }
+		if ( _rpcbMap != null ) {
+	        xdr.xdrEncodeBoolean(true);
+	       _rpcbMap.xdrEncode(xdr);
+	        if(_next != null) {
+	            _next.xdrEncode(xdr);
+			}else{
+				xdr.xdrEncodeBoolean(false);
+			}
+		} else {
+			xdr.xdrEncodeBoolean(false);
+		}
     }
 
     @Override

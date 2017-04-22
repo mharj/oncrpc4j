@@ -35,10 +35,13 @@ import org.dcache.xdr.OncRpcSvc;
 import org.dcache.xdr.OncRpcProgram;
 import org.dcache.xdr.OncRpcSvcBuilder;
 import org.dcache.xdr.XdrBoolean;
+import org.dcache.xdr.XdrInt;
+import org.dcache.xdr.XdrString;
 import org.dcache.xdr.XdrVoid;
 
 
 public class OncRpcbindServer implements RpcDispatchable {
+	private boolean START_PORTMAP_V4 = false; // now as temporary hack via constructor parameter	
 	static final ArrayList<String> v2NetIDs = new ArrayList<String>() {{
 		add("tcp");
 		add("udp");
@@ -50,12 +53,23 @@ public class OncRpcbindServer implements RpcDispatchable {
      * Set of registered services.
      */
     private final Set<rpcb> _services = new HashSet<>();
-
-    public OncRpcbindServer() {
-        _services.add(new rpcb(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V2, "tcp", "0.0.0.0.0.111", "superuser"));
-        _services.add(new rpcb(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V2, "udp", "0.0.0.0.0.111", "superuser"));
-        //_services.add(new rpcb(100000, 4, "tcp", "0.0.0.0.0.111", "superuser"));
+	
+	
+    public OncRpcbindServer(boolean IS_V4) {
+		this.START_PORTMAP_V4 = IS_V4;
+		startServices();
     }
+	public OncRpcbindServer() {
+		startServices();
+	}
+	private void startServices()  {
+		_services.add(new rpcb(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V2, "tcp", "0.0.0.0.0.111", "superuser"));
+		_services.add(new rpcb(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V2, "udp", "0.0.0.0.0.111", "superuser"));
+		if ( START_PORTMAP_V4 == true ) {
+			_services.add(new rpcb(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V4, "tcp", "0.0.0.0.0.111", "superuser"));
+			_services.add(new rpcb(OncRpcPortmap.PORTMAP_PROGRAMM, OncRpcPortmap.PORTMAP_V4, "udp", "0.0.0.0.0.111", "superuser"));
+		}
+	}
     public void dispatchOncRpcCall(RpcCall call) throws OncRpcException, IOException {
         int version = call.getProgramVersion();
 
@@ -65,12 +79,89 @@ public class OncRpcbindServer implements RpcDispatchable {
                 break;
             case 3:
             case 4:
-//                break;
+				if ( START_PORTMAP_V4 == true ) {
+					processV4Call(call);
+					break;
+				}
             default:
                 call.failProgramMismatch(2, 4);
         }
     }
 
+	private void processV4Call(RpcCall call) throws IOException {
+		switch(call.getProcedure()) {
+			case OncRpcPortmap.PMAPPROC_NULL:
+                call.reply(XdrVoid.XDR_VOID);
+                break;
+			case OncRpcPortmap.RPCBPROC_SET:
+				rpcb rpcbMapping = new rpcb();
+				call.retrieveCall(rpcbMapping);
+				Boolean found = false;
+                synchronized(_services) {
+					for ( rpcb c : _services ) {
+						if ( c.getProg() == rpcbMapping.getProg() &&  c.getVers() == rpcbMapping.getVers() && c.getNetid().equals(rpcbMapping.getNetid()) ) {
+							found = true;
+						}
+					}
+					if ( found == false) { // only add if not found already
+						_services.add(rpcbMapping);
+					}
+                }
+                call.reply( (found?XdrBoolean.False:XdrBoolean.True) );
+                break;
+			case OncRpcPortmap.RPCBPROC_UNSET:
+				rpcb rpcbUnsetMapping = new rpcb();
+				call.retrieveCall(rpcbUnsetMapping);
+				Boolean removed = false;
+                synchronized(_services) {
+					Set<rpcb> target = new HashSet<>();
+					// lookup entries
+					for ( rpcb c : _services ) {
+						if ( c.getProg() == rpcbUnsetMapping.getProg() &&  c.getVers() == rpcbUnsetMapping.getVers() && c.getOwner().equals(rpcbUnsetMapping.getOwner()) ) {
+							target.add(c);
+						}
+					}
+					// clear entries
+					for ( rpcb c: target ) {
+						_services.remove(c);
+						removed = true;
+					}
+                }
+                call.reply( (removed?XdrBoolean.True:XdrBoolean.False) );				
+				break;
+			case OncRpcPortmap.RPCBPROC_GETADDR:
+				rpcb query = new rpcb();
+				call.retrieveCall(query);
+				rpcb result = search(query);
+				// TODO: empty string if not found?
+				if ( result == null  )  {
+					call.reply(new XdrString(""));
+				} else {
+					call.reply(new XdrString(result.getAddress()));
+				}
+				break;
+            case OncRpcPortmap.RPCBPROC_DUMP:
+				rpcb_list list = new rpcb_list();
+                rpcb_list next = list;
+                synchronized(_services) {
+                    for(rpcb mapping: _services) {
+                        next.setEntry(mapping);
+                        rpcb_list n = new rpcb_list();
+                        next.setNext(n);
+                        next = n;
+                    }
+                }
+                call.reply(list);
+                break;
+			case OncRpcPortmap.RPCBPROC_GETTIME:
+				call.reply(new XdrInt((int) (System.currentTimeMillis() / 1000L)));
+				break;
+            default:
+                call.failProcedureUnavailable();
+		}
+	}
+			
+	
     private void processV2Call(RpcCall call) throws OncRpcException, IOException {
         switch(call.getProcedure()) {
             case OncRpcPortmap.PMAPPROC_NULL:
